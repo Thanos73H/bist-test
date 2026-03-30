@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BIST Bot">
 <meta name="theme-color" content="#0a0e14">
-<title>BIST ATR Botu | Finnhub API</title>
+<title>BIST ATR Botu | Twelve Data API</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 :root{
@@ -42,10 +42,12 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
 .tag-buy{background:rgba(0,212,170,.15);color:var(--green);border:1px solid rgba(0,212,170,.25)}
 .tag-wait{background:rgba(74,90,110,.2);color:var(--muted);border:1px solid var(--border)}
 .tag-block{background:rgba(255,165,2,.12);color:var(--amber);border:1px solid rgba(255,165,2,.25)}
+.tag-tp{background:rgba(0,212,170,.15);color:var(--green)}
+.tag-sl{background:rgba(255,71,87,.15);color:var(--red)}
 .signal-row{display:flex;align-items:center;padding:11px 14px;border-bottom:1px solid rgba(30,42,58,.5);gap:8px}
 .signal-row:last-child{border-bottom:none}
 .sig-ticker{font-family:var(--mono);font-size:14px;font-weight:600;color:var(--text);min-width:58px}
-.sig-price{font-family:var(--mono);font-size:11px;color:var(--muted);flex:1}
+.sig-price{font-family:var(--mono);font-size:11px;color:var(--text);flex:1;font-weight:500}
 .sig-score{display:flex;gap:2px;align-items:center}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--border)}
 .dot.on{background:var(--accent)}.dot.half{background:rgba(0,212,170,.35)}
@@ -80,14 +82,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
 <div class="header">
   <div>
     <span class="logo">BIST // ATR BOT</span>
-    <span class="badge">Finnhub API · PAPER TRADING</span>
+    <span class="badge">Twelve Data API · PAPER TRADING</span>
   </div>
   <div class="ts" id="ts">—</div>
 </div>
 
 <div class="main">
   <div class="info-note">
-    ⚡ Finnhub API ile canlı veri · Sayfa açılışında otomatik taranır
+    ⚡ Twelve Data ile canlı BIST verisi · Sayfa açılışında otomatik taranır
   </div>
 
   <div class="stats-row">
@@ -126,7 +128,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
 
 <script>
 // ── KONFIGÜRASYON ──────────────────────────────────────────────────────────
-const FINNHUB_KEY = "d75bgp9r01qk56kc54qgd75bgp9r01qk56kc54r0";
+const TWELVE_DATA_KEY = "64d6a007c8f64cf3801dbc529b2f49a1";
 const IC = 10000;
 const MAX_POS = 0.20;
 const COM = 0.001;
@@ -139,7 +141,6 @@ const ATR_TP_MULT = 3.0;
 const PUMP_SPIKE_MAX = 5.0;
 const PUMP_PRICE_MAX = 0.04;
 
-// Finnhub hisse kodları (BIST için .IS ekli)
 const WL = ["THYAO.IS", "GARAN.IS", "AKBNK.IS", "EREGL.IS", "KCHOL.IS", "SAHOL.IS", "ISCTR.IS", "PETKM.IS", "TOASO.IS", "SISE.IS"];
 
 let S = load('bist_p2', { cash: IC, initialCapital: IC, positions: {}, createdAt: new Date().toISOString() });
@@ -169,32 +170,36 @@ function resetPortfolio() {
   renderAll();
 }
 
-// ── FINNHUB API İLE VERİ ÇEKME (CORS YOK!) ──────────────────────────────────
-async function fetchFinnhubCandles(ticker) {
-  // Finnhub'da sembol formatı: THYAO.IS
+// ── TWELVE DATA API İLE VERİ ÇEKME (BIST DESTEKLİ) ──────────────────────────
+async function fetchTwelveDataCandles(ticker) {
+  // Twelve Data için sembol formatı: THYAO.IS (aynı)
   const today = new Date();
-  const to = Math.floor(today.getTime() / 1000);
-  const from = Math.floor(today.setDate(today.getDate() - 120) / 1000); // 120 gün önce
+  const endDate = today.toISOString().split('T')[0];
+  const startDate = new Date(today.setDate(today.getDate() - 120)).toISOString().split('T')[0];
   
-  const url = `https://finnhub.io/api/v1/stock/candle?symbol=${ticker}&resolution=D&from=${from}&to=${to}&token=${FINNHUB_KEY}`;
+  const url = `https://api.twelvedata.com/time_series?symbol=${ticker}&interval=1day&start_date=${startDate}&end_date=${endDate}&apikey=${TWELVE_DATA_KEY}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Finnhub hatası: ${res.status}`);
+  if (!res.ok) throw new Error(`Twelve Data hatası: ${res.status}`);
   const data = await res.json();
   
-  if (data.s !== "ok") throw new Error("Finnhub veri gelmedi");
-  
-  // Finnhub'dan gelen veriyi bizim formatımıza çevir
-  const rows = [];
-  for (let i = 0; i < data.t.length; i++) {
-    rows.push({
-      date: new Date(data.t[i] * 1000),
-      open: data.o[i],
-      high: data.h[i],
-      low: data.l[i],
-      close: data.c[i],
-      volume: data.v[i]
-    });
+  if (data.code === 401 || data.status === "error") {
+    throw new Error(data.message || "API anahtarı geçersiz veya yetkisiz");
   }
+  
+  if (!data.values || data.values.length === 0) {
+    throw new Error("Veri bulunamadı");
+  }
+  
+  // Twelve Data'dan gelen veriyi bizim formatımıza çevir (ters sırada geliyor)
+  const rows = data.values.reverse().map(item => ({
+    date: new Date(item.datetime),
+    open: parseFloat(item.open),
+    high: parseFloat(item.high),
+    low: parseFloat(item.low),
+    close: parseFloat(item.close),
+    volume: parseInt(item.volume)
+  }));
+  
   return rows.filter(r => r.close != null && r.volume != null);
 }
 
@@ -347,7 +352,7 @@ async function runBot() {
   
   for (const ticker of WL) {
     try {
-      const rows = await fetchFinnhubCandles(ticker);
+      const rows = await fetchTwelveDataCandles(ticker);
       const sig = signal(indicators(rows));
       if (S.positions[ticker]) checkExit(ticker, sig.price);
       else if (sig.action === 'ALIŞ') buy(ticker, sig);
@@ -357,7 +362,7 @@ async function runBot() {
       RES.push({ ticker, signal: { action: 'BEKLE', score: 0, blocked: null, price: 0, vol_ratio: 0, atr: 0, macd_ok: false } });
     }
     renderAll();
-    await new Promise(r => setTimeout(r, 500)); // Finnhub rate limit koruması
+    await new Promise(r => setTimeout(r, 500));
   }
   
   btn.disabled = false; btn.innerHTML = '▶ ANALİZ ET';
@@ -392,6 +397,10 @@ function renderAll() {
     const we = document.getElementById('s-winrate'); we.textContent = wr + '%'; we.className = 'stat-value ' + (wr >= 50 ? 'positive' : 'negative');
     document.getElementById('s-trades').textContent = `${sales.length} işlem`;
     const pe = document.getElementById('s-profit'); pe.textContent = (tp >= 0 ? '+' : '') + tp.toFixed(2) + ' TL'; pe.className = 'stat-value ' + (tp >= 0 ? 'positive' : 'negative');
+  } else {
+    document.getElementById('s-winrate').textContent = '—';
+    document.getElementById('s-trades').textContent = 'işlem yok';
+    document.getElementById('s-profit').textContent = '—';
   }
   renderSignals(); renderPositions(); renderTrades();
 }
