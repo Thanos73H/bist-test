@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BIST Bot">
 <meta name="theme-color" content="#0a0e14">
-<title>BIST ATR Botu | Stabil Proxy</title>
+<title>BIST ATR Botu | Finnhub API</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 :root{
@@ -80,14 +80,14 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
 <div class="header">
   <div>
     <span class="logo">BIST // ATR BOT</span>
-    <span class="badge">PAPER TRADING</span>
+    <span class="badge">Finnhub API · PAPER TRADING</span>
   </div>
   <div class="ts" id="ts">—</div>
 </div>
 
 <div class="main">
   <div class="info-note">
-    ⚡ Sayfa açılışında otomatik taranır. "ANALİZ ET" ile manuel taratabilirsiniz.
+    ⚡ Finnhub API ile canlı veri · Sayfa açılışında otomatik taranır
   </div>
 
   <div class="stats-row">
@@ -99,7 +99,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
   </div>
 
   <div class="card">
-    <div class="card-header"><span class="card-title">Sinyaller</span><span class="tag tag-wait" id="scan-status">Taranmadı</span></div>
+    <div class="card-header"><span class="card-title">Sinyaller (MACD & ATR Filtreli)</span><span class="tag tag-wait" id="scan-status">Taranmadı</span></div>
     <div class="filters-row">
       <button class="filter-pill active" onclick="setFilter('all',this)">Tümü</button>
       <button class="filter-pill" onclick="setFilter('buy',this)">Alış</button>
@@ -125,294 +125,324 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
 </div>
 
 <script>
-const IC=10000, MAX_POS=.20, COM=.001, VMA=20, MINSCORE=3;
-const VSPIKE=2.0, ATR_PERIOD=14, ATR_SL_MULT=1.8, ATR_TP_MULT=3.0;
-const PUMP_SPIKE_MAX=5.0, PUMP_PRICE_MAX=0.04;
-const WL=["THYAO.IS","GARAN.IS","AKBNK.IS","EREGL.IS","KCHOL.IS","SAHOL.IS","ISCTR.IS","PETKM.IS","TOASO.IS","SISE.IS"];
+// ── KONFIGÜRASYON ──────────────────────────────────────────────────────────
+const FINNHUB_KEY = "d75bgp9r01qk56kc54qgd75bgp9r01qk56kc54r0";
+const IC = 10000;
+const MAX_POS = 0.20;
+const COM = 0.001;
+const VMA = 20;
+const MINSCORE = 3;
+const VSPIKE = 2.0;
+const ATR_PERIOD = 14;
+const ATR_SL_MULT = 1.8;
+const ATR_TP_MULT = 3.0;
+const PUMP_SPIKE_MAX = 5.0;
+const PUMP_PRICE_MAX = 0.04;
 
-// Birden fazla proxy - biri çalışmazsa diğeri dene
-const PROXIES = [
-  'https://corsproxy.io/?',
-  'https://api.allorigins.win/raw?url=',
-  'https://cors-anywhere.herokuapp.com/'
-];
+// Finnhub hisse kodları (BIST için .IS ekli)
+const WL = ["THYAO.IS", "GARAN.IS", "AKBNK.IS", "EREGL.IS", "KCHOL.IS", "SAHOL.IS", "ISCTR.IS", "PETKM.IS", "TOASO.IS", "SISE.IS"];
 
-let S=load('bist_p2',{cash:IC,initialCapital:IC,positions:{},createdAt:new Date().toISOString()});
-let LOG=load('bist_l2',[]);
-let RES=[];
-let activeFilter='all';
-let isScanning=false;
+let S = load('bist_p2', { cash: IC, initialCapital: IC, positions: {}, createdAt: new Date().toISOString() });
+let LOG = load('bist_l2', []);
+let RES = [];
+let activeFilter = 'all';
+let isScanning = false;
 
-function load(k,def){try{const v=localStorage.getItem(k);return v?JSON.parse(v):def;}catch(e){return def;}}
-function save(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch(e){}}
-function saveS(){save('bist_p2',S);}
-function saveL(){save('bist_l2',LOG);}
+function load(k, def) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch (e) { return def; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } }
+function saveS() { save('bist_p2', S); }
+function saveL() { save('bist_l2', LOG); }
 
-function setFilter(f,btn){
-  activeFilter=f;
-  document.querySelectorAll('.filter-pill').forEach(b=>b.classList.remove('active'));
+function setFilter(f, btn) {
+  activeFilter = f;
+  document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
   renderSignals();
 }
 
-function resetPortfolio(){
-  if(!confirm('Portföy ve geçmiş silinecek. Emin misiniz?'))return;
-  ['bist_p2','bist_l2'].forEach(k=>localStorage.removeItem(k));
-  S=load('bist_p2',{cash:IC,initialCapital:IC,positions:{},createdAt:new Date().toISOString()});
-  LOG=load('bist_l2',[]);RES=[];renderAll();
+function resetPortfolio() {
+  if (!confirm('Portföy ve geçmiş silinecek. Emin misiniz?')) return;
+  ['bist_p2', 'bist_l2'].forEach(k => localStorage.removeItem(k));
+  S = load('bist_p2', { cash: IC, initialCapital: IC, positions: {}, createdAt: new Date().toISOString() });
+  LOG = load('bist_l2', []);
+  RES = [];
+  renderAll();
 }
 
-async function fetchWithProxy(ticker, proxyIndex=0){
-  if(proxyIndex >= PROXIES.length) throw new Error('Tüm proxy\'ler denendi, başarısız');
-  const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=4mo`;
-  const proxyUrl = PROXIES[proxyIndex];
-  let url;
-  if(proxyUrl.includes('allorigins')){
-    url = proxyUrl + encodeURIComponent(targetUrl);
-  } else {
-    url = proxyUrl + encodeURIComponent(targetUrl);
-  }
-  try{
-    const res = await fetch(url);
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const d = await res.json();
-    if(proxyUrl.includes('allorigins') && d.contents){
-      const realData = JSON.parse(d.contents);
-      return realData;
-    }
-    return d;
-  } catch(e){
-    console.warn(`Proxy ${proxyIndex} başarısız:`, e);
-    return fetchWithProxy(ticker, proxyIndex+1);
-  }
-}
-
-async function fetchOHLCV(ticker){
-  const d = await fetchWithProxy(ticker, 0);
-  const r = d.chart.result[0];
-  if(!r) throw new Error('Veri bulunamadı');
-  const q = r.indicators.quote[0];
-  return r.timestamp.map((t,i)=>({
-    date:new Date(t*1000), open:q.open[i], high:q.high[i],
-    low:q.low[i], close:q.close[i], volume:q.volume[i]
-  })).filter(r=>r.close!=null && r.volume!=null);
-}
-
-function indicators(rows){
-  const n=rows.length;
-  for(let i=0;i<n;i++){
-    const sv=rows.slice(Math.max(0,i-VMA+1),i+1);
-    rows[i].vol_ma=sv.reduce((a,b)=>a+b.volume,0)/sv.length;
-    rows[i].vol_ratio=rows[i].volume/(rows[i].vol_ma||1);
-    rows[i].day_chg=i>0?(rows[i].close-rows[i-1].close)/rows[i-1].close:0;
-    rows[i].ma5=rows.slice(Math.max(0,i-4),i+1).reduce((a,b)=>a+b.close,0)/Math.min(5,i+1);
-    rows[i].ma20=rows.slice(Math.max(0,i-19),i+1).reduce((a,b)=>a+b.close,0)/Math.min(20,i+1);
-  }
-  for(let i=0;i<n;i++){
-    const tr=i===0?rows[i].high-rows[i].low:Math.max(
-      rows[i].high-rows[i].low,
-      Math.abs(rows[i].high-rows[i-1].close),
-      Math.abs(rows[i].low-rows[i-1].close)
-    );
-    rows[i].tr=tr;
-  }
-  rows[0].atr=rows[0].tr;
-  const atrK=2/(ATR_PERIOD+1);
-  for(let i=1;i<n;i++) rows[i].atr=rows[i].tr*atrK+rows[i-1].atr*(1-atrK);
+// ── FINNHUB API İLE VERİ ÇEKME (CORS YOK!) ──────────────────────────────────
+async function fetchFinnhubCandles(ticker) {
+  // Finnhub'da sembol formatı: THYAO.IS
+  const today = new Date();
+  const to = Math.floor(today.getTime() / 1000);
+  const from = Math.floor(today.setDate(today.getDate() - 120) / 1000); // 120 gün önce
   
-  rows[0].obv=0;
-  for(let i=1;i<n;i++) rows[i].obv=rows[i-1].obv+(rows[i].close>rows[i-1].close?rows[i].volume:rows[i].close<rows[i-1].close?-rows[i].volume:0);
-  for(let i=0;i<n;i++){
-    const sl=rows.slice(Math.max(0,i-9),i+1);
-    rows[i].obv_ma=sl.reduce((a,b)=>a+b.obv,0)/sl.length;
+  const url = `https://finnhub.io/api/v1/stock/candle?symbol=${ticker}&resolution=D&from=${from}&to=${to}&token=${FINNHUB_KEY}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Finnhub hatası: ${res.status}`);
+  const data = await res.json();
+  
+  if (data.s !== "ok") throw new Error("Finnhub veri gelmedi");
+  
+  // Finnhub'dan gelen veriyi bizim formatımıza çevir
+  const rows = [];
+  for (let i = 0; i < data.t.length; i++) {
+    rows.push({
+      date: new Date(data.t[i] * 1000),
+      open: data.o[i],
+      high: data.h[i],
+      low: data.l[i],
+      close: data.c[i],
+      volume: data.v[i]
+    });
   }
-  for(let i=0;i<n;i++){
-    const s20=rows.slice(Math.max(0,i-19),i+1);
-    const tpv=s20.reduce((a,r)=>a+(r.high+r.low+r.close)/3*r.volume,0);
-    rows[i].vwap=tpv/s20.reduce((a,r)=>a+r.volume,0);
+  return rows.filter(r => r.close != null && r.volume != null);
+}
+
+// ── İNDİKATÖRLER (ATR + MACD) ──────────────────────────────────────────────
+function indicators(rows) {
+  const n = rows.length;
+  for (let i = 0; i < n; i++) {
+    const sv = rows.slice(Math.max(0, i - VMA + 1), i + 1);
+    rows[i].vol_ma = sv.reduce((a, b) => a + b.volume, 0) / sv.length;
+    rows[i].vol_ratio = rows[i].volume / (rows[i].vol_ma || 1);
+    rows[i].day_chg = i > 0 ? (rows[i].close - rows[i - 1].close) / rows[i - 1].close : 0;
+    rows[i].ma5 = rows.slice(Math.max(0, i - 4), i + 1).reduce((a, b) => a + b.close, 0) / Math.min(5, i + 1);
+    rows[i].ma20 = rows.slice(Math.max(0, i - 19), i + 1).reduce((a, b) => a + b.close, 0) / Math.min(20, i + 1);
   }
-  function ema(arr,period){
-    const k=2/(period+1),out=new Array(arr.length).fill(null);
-    let start=0;while(start<arr.length&&arr[start]==null)start++;
-    if(start===arr.length) return out;
-    out[start]=arr[start];
-    for(let i=start+1;i<arr.length;i++) out[i]=arr[i]*k+out[i-1]*(1-k);
+  
+  // ATR
+  for (let i = 0; i < n; i++) {
+    const tr = i === 0 ? rows[i].high - rows[i].low : Math.max(
+      rows[i].high - rows[i].low,
+      Math.abs(rows[i].high - rows[i - 1].close),
+      Math.abs(rows[i].low - rows[i - 1].close)
+    );
+    rows[i].tr = tr;
+  }
+  rows[0].atr = rows[0].tr;
+  const atrK = 2 / (ATR_PERIOD + 1);
+  for (let i = 1; i < n; i++) rows[i].atr = rows[i].tr * atrK + rows[i - 1].atr * (1 - atrK);
+  
+  // OBV
+  rows[0].obv = 0;
+  for (let i = 1; i < n; i++) {
+    rows[i].obv = rows[i - 1].obv + (rows[i].close > rows[i - 1].close ? rows[i].volume : rows[i].close < rows[i - 1].close ? -rows[i].volume : 0);
+  }
+  for (let i = 0; i < n; i++) {
+    const sl = rows.slice(Math.max(0, i - 9), i + 1);
+    rows[i].obv_ma = sl.reduce((a, b) => a + b.obv, 0) / sl.length;
+  }
+  
+  // VWAP
+  for (let i = 0; i < n; i++) {
+    const s20 = rows.slice(Math.max(0, i - 19), i + 1);
+    const tpv = s20.reduce((a, r) => a + (r.high + r.low + r.close) / 3 * r.volume, 0);
+    rows[i].vwap = tpv / s20.reduce((a, r) => a + r.volume, 0);
+  }
+  
+  // MACD
+  function ema(arr, period) {
+    const k = 2 / (period + 1), out = new Array(arr.length).fill(null);
+    let start = 0; while (start < arr.length && arr[start] == null) start++;
+    if (start === arr.length) return out;
+    out[start] = arr[start];
+    for (let i = start + 1; i < arr.length; i++) out[i] = arr[i] * k + out[i - 1] * (1 - k);
     return out;
   }
-  const closes=rows.map(r=>r.close);
-  const ema12=ema(closes,12),ema26=ema(closes,26);
-  const macdLine=ema12.map((v,i)=>v!=null&&ema26[i]!=null?v-ema26[i]:null);
-  const signalLine=ema(macdLine,9);
-  for(let i=0;i<n;i++){
-    rows[i].macd=macdLine[i];
-    rows[i].macd_signal=signalLine[i];
-    rows[i].macd_hist=macdLine[i]!=null&&signalLine[i]!=null?macdLine[i]-signalLine[i]:null;
+  const closes = rows.map(r => r.close);
+  const ema12 = ema(closes, 12), ema26 = ema(closes, 26);
+  const macdLine = ema12.map((v, i) => v != null && ema26[i] != null ? v - ema26[i] : null);
+  const signalLine = ema(macdLine, 9);
+  for (let i = 0; i < n; i++) {
+    rows[i].macd = macdLine[i];
+    rows[i].macd_signal = signalLine[i];
+    rows[i].macd_hist = macdLine[i] != null && signalLine[i] != null ? macdLine[i] - signalLine[i] : null;
   }
-  for(let i=14;i<n;i++){
-    let g=0,l=0;
-    for(let j=i-13;j<=i;j++){const d=rows[j].close-rows[j-1].close;if(d>0)g+=d;else l-=d;}
-    rows[i].rsi=100-100/(1+(g/(l||1)));
+  
+  // RSI
+  for (let i = 14; i < n; i++) {
+    let g = 0, l = 0;
+    for (let j = i - 13; j <= i; j++) {
+      const d = rows[j].close - rows[j - 1].close;
+      if (d > 0) g += d; else l -= d;
+    }
+    rows[i].rsi = 100 - 100 / (1 + (g / (l || 1)));
   }
   return rows;
 }
 
-function isPump(L){
-  return (L.vol_ratio||0)>PUMP_SPIKE_MAX && Math.abs(L.day_chg||0)>PUMP_PRICE_MAX;
+function isPump(L) {
+  return (L.vol_ratio || 0) > PUMP_SPIKE_MAX && Math.abs(L.day_chg || 0) > PUMP_PRICE_MAX;
 }
 
-function signal(rows){
-  if(rows.length<30) return {action:'BEKLE',score:0,reasons:[],blocked:null,price:0,vol_ratio:0,rsi:null,atr:0,macd_ok:false};
-  const L=rows[rows.length-1], P=rows[rows.length-2];
-  if(isPump(L)) return {action:'ENGEL',score:0,blocked:'pump_dump',reasons:[],price:L.close,vol_ratio:L.vol_ratio||0,rsi:L.rsi||null,atr:L.atr||0,macd_ok:false};
-  const macdOk = L.macd!=null && L.macd_signal!=null && L.macd_hist>0;
-  let sc=0;
-  if((L.vol_ratio||0)>=VSPIKE) sc+=1;
-  if(L.obv>L.obv_ma && P.obv<=P.obv_ma) sc+=1;
-  else if(L.obv>L.obv_ma) sc+=0.5;
-  if(L.close>L.vwap) sc+=1;
-  if(L.ma5>L.ma20 && P.ma5<=P.ma20) sc+=1.5;
-  else if(L.ma5>L.ma20) sc+=0.5;
-  if(L.rsi!=null){if(L.rsi<35) sc+=1; else if(L.rsi<65) sc+=0.5;}
-  if(macdOk) sc+=0.5;
-  sc=Math.min(parseFloat(sc.toFixed(1)),5.5);
-  let blocked=null, action='BEKLE';
-  if(sc>=MINSCORE){
-    if(!macdOk){blocked='macd_neg'; action='ENGEL';}
-    else action='ALIŞ';
+function signal(rows) {
+  if (rows.length < 30) return { action: 'BEKLE', score: 0, reasons: [], blocked: null, price: 0, vol_ratio: 0, rsi: null, atr: 0, macd_ok: false };
+  const L = rows[rows.length - 1], P = rows[rows.length - 2];
+  
+  if (isPump(L)) {
+    return { action: 'ENGEL', score: 0, blocked: 'pump_dump', reasons: [], price: L.close, vol_ratio: L.vol_ratio || 0, rsi: L.rsi || null, atr: L.atr || 0, macd_ok: false };
   }
-  return {action,score:sc,blocked,price:L.close,vol_ratio:L.vol_ratio||0,rsi:L.rsi||null,atr:L.atr||0,macd_ok:macdOk,reasons:[]};
+  
+  const macdOk = L.macd != null && L.macd_signal != null && L.macd_hist > 0;
+  let sc = 0;
+  if ((L.vol_ratio || 0) >= VSPIKE) sc += 1;
+  if (L.obv > L.obv_ma && P.obv <= P.obv_ma) sc += 1;
+  else if (L.obv > L.obv_ma) sc += 0.5;
+  if (L.close > L.vwap) sc += 1;
+  if (L.ma5 > L.ma20 && P.ma5 <= P.ma20) sc += 1.5;
+  else if (L.ma5 > L.ma20) sc += 0.5;
+  if (L.rsi != null) { if (L.rsi < 35) sc += 1; else if (L.rsi < 65) sc += 0.5; }
+  if (macdOk) sc += 0.5;
+  sc = Math.min(parseFloat(sc.toFixed(1)), 5.5);
+  
+  let blocked = null, action = 'BEKLE';
+  if (sc >= MINSCORE) {
+    if (!macdOk) { blocked = 'macd_neg'; action = 'ENGEL'; }
+    else action = 'ALIŞ';
+  }
+  return { action, score: sc, blocked, price: L.close, vol_ratio: L.vol_ratio || 0, rsi: L.rsi || null, atr: L.atr || 0, macd_ok: macdOk, reasons: [] };
 }
 
-function calcSLTP(price,atr){ return { stop_loss: price - atr*ATR_SL_MULT, take_profit: price + atr*ATR_TP_MULT }; }
-function buy(ticker,sig){
-  if(S.positions[ticker]) return null;
-  const inv=Math.min(S.initialCapital*MAX_POS, S.cash*.95);
-  if(inv<100) return null;
-  const com=inv*COM, qty=(inv-com)/sig.price;
-  const {stop_loss,take_profit}=calcSLTP(sig.price,sig.atr);
-  S.cash-=inv;
-  S.positions[ticker]={qty,buy_price:sig.price,buy_date:new Date().toISOString(), stop_loss,take_profit,atr:sig.atr,signal_score:sig.score,invest_amount:inv};
+function calcSLTP(price, atr) { return { stop_loss: price - atr * ATR_SL_MULT, take_profit: price + atr * ATR_TP_MULT }; }
+
+function buy(ticker, sig) {
+  if (S.positions[ticker]) return null;
+  const inv = Math.min(S.initialCapital * MAX_POS, S.cash * 0.95);
+  if (inv < 100) return null;
+  const com = inv * COM, qty = (inv - com) / sig.price;
+  const { stop_loss, take_profit } = calcSLTP(sig.price, sig.atr);
+  S.cash -= inv;
+  S.positions[ticker] = { qty, buy_price: sig.price, buy_date: new Date().toISOString(), stop_loss, take_profit, atr: sig.atr, signal_score: sig.score, invest_amount: inv };
   saveS();
-  LOG.unshift({action:'ALIŞ',ticker,price:sig.price,qty,invest:inv,commission:com,stop_loss,take_profit,sl_pct:((sig.price-stop_loss)/sig.price*100).toFixed(1),tp_pct:((take_profit-sig.price)/sig.price*100).toFixed(1),signal_score:sig.score,timestamp:new Date().toISOString()});
+  LOG.unshift({ action: 'ALIŞ', ticker, price: sig.price, qty, invest: inv, commission: com, stop_loss, take_profit, sl_pct: ((sig.price - stop_loss) / sig.price * 100).toFixed(1), tp_pct: ((take_profit - sig.price) / sig.price * 100).toFixed(1), signal_score: sig.score, timestamp: new Date().toISOString() });
   saveL();
   return true;
 }
-function checkExit(ticker,price){
-  const p=S.positions[ticker]; if(!p) return null;
-  if(price<=p.stop_loss) return sell(ticker,price,'STOP-LOSS');
-  if(price>=p.take_profit) return sell(ticker,price,'TAKE-PROFIT');
+
+function checkExit(ticker, price) {
+  const p = S.positions[ticker]; if (!p) return null;
+  if (price <= p.stop_loss) return sell(ticker, price, 'STOP-LOSS (ATR)');
+  if (price >= p.take_profit) return sell(ticker, price, 'TAKE-PROFIT (ATR)');
   return null;
 }
-function sell(ticker,price,reason){
-  const p=S.positions[ticker]; if(!p) return null;
-  const gross=p.qty*price, com=gross*COM, net=gross-com;
-  const profit=net-p.invest_amount, pct=profit/p.invest_amount*100;
-  S.cash+=net; delete S.positions[ticker]; saveS();
-  LOG.unshift({action:'SATIŞ',ticker,price,qty:p.qty,gross,commission:com,net,profit,profit_pct:pct,reason,buy_price:p.buy_price,timestamp:new Date().toISOString()});
+
+function sell(ticker, price, reason) {
+  const p = S.positions[ticker]; if (!p) return null;
+  const gross = p.qty * price, com = gross * COM, net = gross - com;
+  const profit = net - p.invest_amount, pct = profit / p.invest_amount * 100;
+  S.cash += net; delete S.positions[ticker]; saveS();
+  LOG.unshift({ action: 'SATIŞ', ticker, price, qty: p.qty, gross, commission: com, net, profit, profit_pct: pct, reason, buy_price: p.buy_price, timestamp: new Date().toISOString() });
   saveL();
   return true;
 }
 
-async function runBot(){
-  if(isScanning) return;
-  isScanning=true;
-  const btn=document.getElementById('runBtn');
-  btn.disabled=true; btn.innerHTML='<span class="spinner"></span>Analiz...';
-  document.getElementById('scan-status').textContent='Taranıyor...';
-  document.getElementById('ts').textContent=new Date().toLocaleString('tr-TR');
-  RES=[];
-  for(const ticker of WL){
-    try{
-      const rows=await fetchOHLCV(ticker);
-      const sig=signal(indicators(rows));
-      if(S.positions[ticker]) checkExit(ticker,sig.price);
-      else if(sig.action==='ALIŞ') buy(ticker,sig);
-      RES.push({ticker,signal:sig});
-    }catch(e){
+async function runBot() {
+  if (isScanning) return;
+  isScanning = true;
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Analiz...';
+  document.getElementById('scan-status').textContent = 'Taranıyor...';
+  document.getElementById('ts').textContent = new Date().toLocaleString('tr-TR');
+  RES = [];
+  
+  for (const ticker of WL) {
+    try {
+      const rows = await fetchFinnhubCandles(ticker);
+      const sig = signal(indicators(rows));
+      if (S.positions[ticker]) checkExit(ticker, sig.price);
+      else if (sig.action === 'ALIŞ') buy(ticker, sig);
+      RES.push({ ticker, signal: sig });
+    } catch (e) {
       console.warn(ticker, e);
-      RES.push({ticker,signal:{action:'BEKLE',score:0,blocked:null,price:0,vol_ratio:0,atr:0,macd_ok:false}});
+      RES.push({ ticker, signal: { action: 'BEKLE', score: 0, blocked: null, price: 0, vol_ratio: 0, atr: 0, macd_ok: false } });
     }
     renderAll();
-    await new Promise(r=>setTimeout(r,400));
+    await new Promise(r => setTimeout(r, 500)); // Finnhub rate limit koruması
   }
-  btn.disabled=false; btn.innerHTML='▶ ANALİZ ET';
-  const blocked=RES.filter(r=>r.signal.blocked).length;
-  document.getElementById('scan-status').textContent=`${WL.length} hisse${blocked?` · ${blocked} engel`:''}`;
-  document.getElementById('scan-status').className='tag tag-buy';
-  isScanning=false;
+  
+  btn.disabled = false; btn.innerHTML = '▶ ANALİZ ET';
+  const blocked = RES.filter(r => r.signal.blocked).length;
+  document.getElementById('scan-status').textContent = `${WL.length} hisse${blocked ? ` · ${blocked} engel` : ''}`;
+  document.getElementById('scan-status').className = 'tag tag-buy';
+  isScanning = false;
 }
 
-function pv(){
-  let v=S.cash;
-  for(const[t,p]of Object.entries(S.positions)){
-    const r=RES.find(r=>r.ticker===t);
-    v+=p.qty*(r?r.signal.price:p.buy_price);
+function pv() {
+  let v = S.cash;
+  for (const [t, p] of Object.entries(S.positions)) {
+    const r = RES.find(r => r.ticker === t);
+    v += p.qty * (r ? r.signal.price : p.buy_price);
   }
   return v;
 }
-function dots(score){
-  return[1,2,3,4,5].map(i=>`<span class="dot${score>=i?' on':score>=i-.5?' half':''}"></span>`).join('');
+
+function dots(score) {
+  return [1, 2, 3, 4, 5].map(i => `<span class="dot${score >= i ? ' on' : score >= i - 0.5 ? ' half' : ''}"></span>`).join('');
 }
-function renderAll(){
-  const val=pv(), ret=(val/IC-1)*100, pnl=val-IC;
-  document.getElementById('s-portfolio').textContent=val.toLocaleString('tr-TR',{minimumFractionDigits:2});
-  const re=document.getElementById('s-return'); re.textContent=(ret>=0?'+':'')+ret.toFixed(2)+'%'; re.className='stat-value '+(ret>=0?'positive':'negative');
-  document.getElementById('s-pnl-abs').textContent=(pnl>=0?'+':'')+pnl.toFixed(0)+' TL';
-  document.getElementById('s-cash').textContent=S.cash.toLocaleString('tr-TR');
-  const sales=LOG.filter(t=>t.action==='SATIŞ');
-  if(sales.length){
-    const wins=sales.filter(t=>t.profit>0), wr=(wins.length/sales.length*100).toFixed(1), tp=sales.reduce((a,t)=>a+t.profit,0);
-    const we=document.getElementById('s-winrate'); we.textContent=wr+'%'; we.className='stat-value '+(wr>=50?'positive':'negative');
-    document.getElementById('s-trades').textContent=`${sales.length} işlem`;
-    const pe=document.getElementById('s-profit'); pe.textContent=(tp>=0?'+':'')+tp.toFixed(2)+' TL'; pe.className='stat-value '+(tp>=0?'positive':'negative');
+
+function renderAll() {
+  const val = pv(), ret = (val / IC - 1) * 100, pnl = val - IC;
+  document.getElementById('s-portfolio').textContent = val.toLocaleString('tr-TR', { minimumFractionDigits: 2 });
+  const re = document.getElementById('s-return'); re.textContent = (ret >= 0 ? '+' : '') + ret.toFixed(2) + '%'; re.className = 'stat-value ' + (ret >= 0 ? 'positive' : 'negative');
+  document.getElementById('s-pnl-abs').textContent = (pnl >= 0 ? '+' : '') + pnl.toFixed(0) + ' TL';
+  document.getElementById('s-cash').textContent = S.cash.toLocaleString('tr-TR');
+  const sales = LOG.filter(t => t.action === 'SATIŞ');
+  if (sales.length) {
+    const wins = sales.filter(t => t.profit > 0), wr = (wins.length / sales.length * 100).toFixed(1), tp = sales.reduce((a, t) => a + t.profit, 0);
+    const we = document.getElementById('s-winrate'); we.textContent = wr + '%'; we.className = 'stat-value ' + (wr >= 50 ? 'positive' : 'negative');
+    document.getElementById('s-trades').textContent = `${sales.length} işlem`;
+    const pe = document.getElementById('s-profit'); pe.textContent = (tp >= 0 ? '+' : '') + tp.toFixed(2) + ' TL'; pe.className = 'stat-value ' + (tp >= 0 ? 'positive' : 'negative');
   }
   renderSignals(); renderPositions(); renderTrades();
 }
-function renderSignals(){
-  if(!RES.length) return;
-  let filtered=RES;
-  if(activeFilter==='buy') filtered=RES.filter(r=>r.signal.action==='ALIŞ');
-  if(activeFilter==='block') filtered=RES.filter(r=>r.signal.blocked);
-  if(!filtered.length){document.getElementById('signals-list').innerHTML='<div class="empty">Sonuç yok</div>';return;}
-  document.getElementById('signals-list').innerHTML=filtered.map(r=>{
-    const s=r.signal;
+
+function renderSignals() {
+  if (!RES.length) return;
+  let filtered = RES;
+  if (activeFilter === 'buy') filtered = RES.filter(r => r.signal.action === 'ALIŞ');
+  if (activeFilter === 'block') filtered = RES.filter(r => r.signal.blocked);
+  if (!filtered.length) { document.getElementById('signals-list').innerHTML = '<div class="empty">Sonuç yok</div>'; return; }
+  document.getElementById('signals-list').innerHTML = filtered.map(r => {
+    const s = r.signal;
     let tagHtml;
-    if(s.action==='ALIŞ') tagHtml='<span class="tag tag-buy">ALIŞ</span>';
-    else if(s.blocked==='pump_dump') tagHtml='<span class="tag tag-block">PUMP</span>';
-    else if(s.blocked==='macd_neg') tagHtml='<span class="tag tag-block">MACD↓</span>';
-    else tagHtml='<span class="tag tag-wait">BEKLE</span>';
-    const macdIcon=s.macd_ok?'<span class="sig-macd pct-up">▲</span>':'<span class="sig-macd pct-dn">▼</span>';
-    return`<div class="signal-row"><div class="sig-ticker">${r.ticker.replace('.IS','')}</div><div class="sig-price">${s.price?s.price.toFixed(2):'—'}</div><div class="sig-score">${dots(s.score)}</div>${macdIcon}${tagHtml}</div>`;
-  }).join('');
-}
-function renderPositions(){
-  const entries=Object.entries(S.positions);
-  document.getElementById('pos-count').textContent=entries.length;
-  if(!entries.length){document.getElementById('positions-body').innerHTML='<div class="empty">Pozisyon yok</div>';return;}
-  document.getElementById('positions-body').innerHTML=entries.map(([t,p])=>{
-    const r=RES.find(r=>r.ticker===t), cur=r?r.signal.price:p.buy_price;
-    const pnl2=(cur/p.buy_price-1)*100, pnlAbs=p.qty*(cur-p.buy_price);
-    const range=p.take_profit-p.stop_loss, pct2=Math.max(0,Math.min(100,(cur-p.stop_loss)/range*100));
-    const slPct=((p.buy_price-p.stop_loss)/p.buy_price*100).toFixed(1);
-    const tpPct=((p.take_profit-p.buy_price)/p.buy_price*100).toFixed(1);
-    return`<div class="pos-item"><div class="pos-top"><span class="pos-ticker">${t.replace('.IS','')}</span><span class="pos-pnl ${pnl2>=0?'pct-up':'pct-dn'}">${pnl2>=0?'+':''}${pnl2.toFixed(1)}%</span></div><div class="pos-atr">ATR stop: -%${slPct} · hedef: +%${tpPct}</div><div class="pos-mid"><span>SL ${p.stop_loss.toFixed(2)}</span><span>${cur.toFixed(2)}</span><span>TP ${p.take_profit.toFixed(2)}</span></div><div class="prog-bg"><div class="prog-fill" style="width:${pct2}%;background:${pnl2>=0?'var(--green)':'var(--red)'}"></div></div><div style="font-size:10px">${pnlAbs>=0?'+':''}${pnlAbs.toFixed(0)} TL · ${p.qty.toFixed(1)} adet</div></div>`;
-  }).join('');
-}
-function renderTrades(){
-  document.getElementById('log-count').textContent=LOG.length;
-  if(!LOG.length){document.getElementById('trades-list').innerHTML='<div class="empty">Geçmiş yok</div>';return;}
-  document.getElementById('trades-list').innerHTML=LOG.slice(0,40).map(t=>{
-    const dt=new Date(t.timestamp);
-    const ts2=dt.toLocaleDateString('tr-TR')+' '+dt.toLocaleTimeString('tr-TR');
-    const tag=t.action==='ALIŞ'?'tag-buy':t.profit>=0?'tag-tp':'tag-sl';
-    const pnlC=t.action==='SATIŞ'?`<span class="${t.profit>=0?'pct-up':'pct-dn'}">${t.profit>=0?'+':''}${t.profit.toFixed(2)} TL</span>`:'';
-    return`<div class="trade-item"><div class="trade-top"><span class="tag ${tag}">${t.action}</span><span class="trade-ticker">${t.ticker.replace('.IS','')}</span><span class="trade-price">${t.price.toFixed(2)} TL</span>${pnlC}</div><div class="trade-bot">${ts2}</div></div>`;
+    if (s.action === 'ALIŞ') tagHtml = '<span class="tag tag-buy">ALIŞ</span>';
+    else if (s.blocked === 'pump_dump') tagHtml = '<span class="tag tag-block">PUMP</span>';
+    else if (s.blocked === 'macd_neg') tagHtml = '<span class="tag tag-block">MACD↓</span>';
+    else tagHtml = '<span class="tag tag-wait">BEKLE</span>';
+    const macdIcon = s.macd_ok ? '<span class="sig-macd pct-up">▲</span>' : '<span class="sig-macd pct-dn">▼</span>';
+    return `<div class="signal-row"><div class="sig-ticker">${r.ticker.replace('.IS', '')}</div><div class="sig-price">${s.price ? s.price.toFixed(2) : '—'}</div><div class="sig-score">${dots(s.score)}</div>${macdIcon}${tagHtml}</div>`;
   }).join('');
 }
 
-document.getElementById('ts').textContent=new Date().toLocaleString('tr-TR');
+function renderPositions() {
+  const entries = Object.entries(S.positions);
+  document.getElementById('pos-count').textContent = entries.length;
+  if (!entries.length) { document.getElementById('positions-body').innerHTML = '<div class="empty">Pozisyon yok</div>'; return; }
+  document.getElementById('positions-body').innerHTML = entries.map(([t, p]) => {
+    const r = RES.find(r => r.ticker === t), cur = r ? r.signal.price : p.buy_price;
+    const pnl2 = (cur / p.buy_price - 1) * 100, pnlAbs = p.qty * (cur - p.buy_price);
+    const range = p.take_profit - p.stop_loss, pct2 = Math.max(0, Math.min(100, (cur - p.stop_loss) / range * 100));
+    const slPct = ((p.buy_price - p.stop_loss) / p.buy_price * 100).toFixed(1);
+    const tpPct = ((p.take_profit - p.buy_price) / p.buy_price * 100).toFixed(1);
+    return `<div class="pos-item"><div class="pos-top"><span class="pos-ticker">${t.replace('.IS', '')}</span><span class="pos-pnl ${pnl2 >= 0 ? 'pct-up' : 'pct-dn'}">${pnl2 >= 0 ? '+' : ''}${pnl2.toFixed(1)}%</span></div><div class="pos-atr">ATR stop: -%${slPct} · hedef: +%${tpPct}</div><div class="pos-mid"><span>SL ${p.stop_loss.toFixed(2)}</span><span>${cur.toFixed(2)}</span><span>TP ${p.take_profit.toFixed(2)}</span></div><div class="prog-bg"><div class="prog-fill" style="width:${pct2}%;background:${pnl2 >= 0 ? 'var(--green)' : 'var(--red)'}"></div></div><div style="font-size:10px">${pnlAbs >= 0 ? '+' : ''}${pnlAbs.toFixed(0)} TL · ${p.qty.toFixed(1)} adet</div></div>`;
+  }).join('');
+}
+
+function renderTrades() {
+  document.getElementById('log-count').textContent = LOG.length;
+  if (!LOG.length) { document.getElementById('trades-list').innerHTML = '<div class="empty">Geçmiş yok</div>'; return; }
+  document.getElementById('trades-list').innerHTML = LOG.slice(0, 40).map(t => {
+    const dt = new Date(t.timestamp);
+    const ts2 = dt.toLocaleDateString('tr-TR') + ' ' + dt.toLocaleTimeString('tr-TR');
+    const tag = t.action === 'ALIŞ' ? 'tag-buy' : t.profit >= 0 ? 'tag-tp' : 'tag-sl';
+    const pnlC = t.action === 'SATIŞ' ? `<span class="${t.profit >= 0 ? 'pct-up' : 'pct-dn'}">${t.profit >= 0 ? '+' : ''}${t.profit.toFixed(2)} TL</span>` : '';
+    return `<div class="trade-item"><div class="trade-top"><span class="tag ${tag}">${t.action}</span><span class="trade-ticker">${t.ticker.replace('.IS', '')}</span><span class="trade-price">${t.price.toFixed(2)} TL</span>${pnlC}</div><div class="trade-bot">${ts2}</div></div>`;
+  }).join('');
+}
+
+document.getElementById('ts').textContent = new Date().toLocaleString('tr-TR');
 renderAll();
-window.addEventListener('load',()=>setTimeout(runBot,1000));
+window.addEventListener('load', () => setTimeout(runBot, 1000));
 </script>
 </body>
 </html>
