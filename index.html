@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="tr">
 <head>
-<meta charset="UTF-8">const MINSCORE = 2.5;
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BIST Bot">
 <meta name="theme-color" content="#0a0e14">
-<title>BIST ATR Botu | BIST 100 Tarama</title>
+<title>BIST ATR Botu | 20 Hisse</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
 :root{
@@ -81,15 +81,15 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
 
 <div class="header">
   <div>
-    <span class="logo">BIST // OTONOM BOT</span>
-    <span class="badge">BIST 100 · Otomatik Seçim</span>
+    <span class="logo">BIST // ATR BOT</span>
+    <span class="badge">20 Hisse · MINSCORE 2.0</span>
   </div>
   <div class="ts" id="ts">—</div>
 </div>
 
 <div class="main">
   <div class="info-note">
-    🤖 Bot, BIST 100 hisselerini tarar. En likit 50 hisse analiz edilir (hacme göre otomatik).
+    🤖 BIST 100'den en likit 20 hisse · API limitine uygun
   </div>
 
   <div class="stats-row">
@@ -101,7 +101,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
   </div>
 
   <div class="card">
-    <div class="card-header"><span class="card-title">Sinyaller (Otomatik Tarananlar)</span><span class="tag tag-wait" id="scan-status">Taranmadı</span></div>
+    <div class="card-header"><span class="card-title">Sinyaller</span><span class="tag tag-wait" id="scan-status">Taranmadı</span></div>
     <div class="filters-row">
       <button class="filter-pill active" onclick="setFilter('all',this)">Tümü</button>
       <button class="filter-pill" onclick="setFilter('buy',this)">Alış</button>
@@ -127,28 +127,26 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15
 </div>
 
 <script>
-// ── KONFIGÜRASYON (OPTİMİZE) ────────────────────────────────────────────────
+// ── KONFIGÜRASYON (20 HİSSE + MINSCORE 2.0) ─────────────────────────────────
 const TWELVE_DATA_KEY = "64d6a007c8f64cf3801dbc529b2f49a1";
 const IC = 10000;
-const MAX_POS = 0.15;           // %15 (dengeli risk)
+const MAX_POS = 0.15;           // %15
 const COM = 0.001;
 const VMA = 20;
-const MINSCORE = 1.5;           // Daha fazla sinyal için düşürüldü
-const VSPIKE = 1.8;             // Hacim eşiği düşürüldü, daha hassas
+const MINSCORE = 2.0;           // Dengeli eşik
+const VSPIKE = 1.8;             
 const ATR_PERIOD = 14;
-const ATR_SL_MULT = 2.0;        // Stop genişletildi (daha az stop)
+const ATR_SL_MULT = 2.0;        
 const ATR_TP_MULT = 3.0;
 const PUMP_SPIKE_MAX = 5.0;
 const PUMP_PRICE_MAX = 0.04;
 
-// BIST 100 Hisseleri (likiditeye göre sıralı - en likit 50 hisse)
-// Bot bu listeden otomatik tarama yapacak
-const BIST_100_SYMBOLS = [
-  "THYAO", "GARAN", "AKBNK", "EREGL", "KCHOL", "SAHOL", "ISCTR", "PETKM", "TOASO", "SISE",
-  "BIMAS", "TUPRS", "ASELS", "FROTO", "SASA", "YKBNK", "KOZAL", "TCELL", "PGSUS", "EKGYO",
-  "KRDMD", "HEKTS", "CCOLA", "ODAS", "SOKM", "ALARK", "TAVHL", "TTKOM", "VESTL", "DOHOL",
-  "MGROS", "KONTR", "KOZAA", "OTKAR", "BRSAN", "GUBRF", "SKBNK", "ULKER", "AEFES", "HALKB",
-  "TSKB", "QUAGR", "IPEKE", "ISGYO", "MAVI", "ARCLK", "TTRAK", "TUKAS", "NTHOL", "KAPLM"
+// BIST 100'den en likit 20 hisse
+const SYMBOLS = [
+  "THYAO", "GARAN", "AKBNK", "EREGL", "KCHOL", 
+  "SAHOL", "ISCTR", "PETKM", "TOASO", "SISE",
+  "BIMAS", "TUPRS", "ASELS", "FROTO", "SASA", 
+  "YKBNK", "KOZAL", "TCELL", "PGSUS", "EKGYO"
 ];
 
 let S = load('bist_p2', { cash: IC, initialCapital: IC, positions: {}, createdAt: new Date().toISOString() });
@@ -178,7 +176,6 @@ function resetPortfolio() {
   renderAll();
 }
 
-// ── TWELVE DATA API ─────────────────────────────────────────────────────────
 async function fetchTwelveDataCandles(symbol) {
   const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=1day&outputsize=120&apikey=${TWELVE_DATA_KEY}`;
   const res = await fetch(url);
@@ -204,7 +201,6 @@ async function fetchTwelveDataCandles(symbol) {
   return rows.filter(r => r.close != null && r.volume != null);
 }
 
-// ── İNDİKATÖRLER (ATR + MACD) ──────────────────────────────────────────────
 function indicators(rows) {
   const n = rows.length;
   for (let i = 0; i < n; i++) {
@@ -342,8 +338,7 @@ async function runBot() {
   document.getElementById('ts').textContent = new Date().toLocaleString('tr-TR');
   RES = [];
   
-  // Tüm BIST 100 hisselerini tara
-  for (const symbol of BIST_100_SYMBOLS) {
+  for (const symbol of SYMBOLS) {
     try {
       const rows = await fetchTwelveDataCandles(symbol);
       const sig = signal(indicators(rows));
@@ -355,13 +350,13 @@ async function runBot() {
       RES.push({ ticker: symbol, signal: { action: 'BEKLE', score: 0, blocked: null, price: 0, vol_ratio: 0, atr: 0, macd_ok: false } });
     }
     renderAll();
-    await new Promise(r => setTimeout(r, 400)); // API limit koruması
+    await new Promise(r => setTimeout(r, 300));
   }
   
   btn.disabled = false; btn.innerHTML = '▶ ANALİZ ET';
   const buySignals = RES.filter(r => r.signal.action === 'ALIŞ').length;
   const blocked = RES.filter(r => r.signal.blocked).length;
-  document.getElementById('scan-status').textContent = `${BIST_100_SYMBOLS.length} hisse · ${buySignals} ALIŞ · ${blocked} engel`;
+  document.getElementById('scan-status').textContent = `${SYMBOLS.length} hisse · ${buySignals} ALIŞ · ${blocked} engel`;
   document.getElementById('scan-status').className = 'tag tag-buy';
   isScanning = false;
 }
@@ -401,7 +396,6 @@ function renderAll() {
 
 function renderSignals() {
   if (!RES.length) return;
-  // Sadece ALIŞ veya ENGEL olanları göster (BEKLE'leri gösterme)
   let filtered = RES.filter(r => r.signal.action === 'ALIŞ' || r.signal.blocked);
   if (activeFilter === 'buy') filtered = RES.filter(r => r.signal.action === 'ALIŞ');
   if (activeFilter === 'block') filtered = RES.filter(r => r.signal.blocked);
